@@ -271,6 +271,30 @@
         </div>
     </footer>
 
+    <!-- Asistente AI (Gemini Flash) -->
+    <div id="assistant-chat" class="assistant closed" aria-hidden="true">
+        <button id="assistant-toggle" class="assistant-toggle" aria-label="Abrir chat">
+            <span class="assistant-avatar">🤖</span>
+            <span class="assistant-label">Asistente</span>
+        </button>
+
+        <div class="assistant-window" role="dialog" aria-modal="false" aria-label="Asistente AI">
+            <header class="assistant-header">
+                <div class="assistant-title">Asistente • Gemini Flash</div>
+                <button id="assistant-close" class="assistant-close" aria-label="Cerrar">✕</button>
+            </header>
+
+            <div id="assistant-messages" class="assistant-messages" role="log" aria-live="polite"></div>
+
+            <form id="assistant-form" class="assistant-form">
+                <input id="assistant-input" type="text" placeholder="Escribe tu pregunta..." autocomplete="off" required />
+                <button type="submit" class="assistant-send">Enviar</button>
+            </form>
+
+            <div class="assistant-footer">Conectado a Gemini Flash (proxy requerido)</div>
+        </div>
+    </div>
+
     <script src="script.js"></script>
 </body>
 </html>

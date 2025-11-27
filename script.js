@@ -172,3 +172,172 @@ if (logo) {
         }
     });
 }
+
+/* --- Asistente Gemini (fetch puro) --- */
+(function(){
+  const root = document.getElementById('assistant-chat');
+  if (!root) return;
+
+  const toggle = document.getElementById('assistant-toggle');
+  const closeBtn = document.getElementById('assistant-close');
+  const form = document.getElementById('assistant-form');
+  const input = document.getElementById('assistant-input');
+  const messagesEl = document.getElementById('assistant-messages');
+
+  // Poner a false para hacer llamadas reales (riesgo: expone la API key en el cliente)
+  const ASSISTANT_TEST_MODE = false;
+
+  async function sendToGemini(prompt) {
+    if (ASSISTANT_TEST_MODE) {
+      await new Promise(r => setTimeout(r, 700));
+      return { text: "Respuesta simulada: " + prompt, simulated: true };
+    }
+
+    // ADVERTENCIA: si pruebas desde cliente, usa YOUR_API_KEY_HERE (no recomendado en producción)
+    const API_KEY = 'AIzaSyA7K0JuntY4g44g5S8qJvLgolemkZ4BNOA';
+    const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+
+    // <-- enviar solo el prompt del usuario, no texto fijo
+    const bodyPayload = {
+      contents: [
+        {
+          parts: [
+            { text: String(prompt) }
+          ]
+        }
+      ]
+    };
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-goog-api-key': API_KEY },
+      body: JSON.stringify(bodyPayload)
+    });
+
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Gemini returned ${res.status}: ${txt}`);
+    }
+
+    const json = await res.json();
+
+    // Parsing robusto y limpieza final
+    let text = '';
+    if (Array.isArray(json?.candidates) && json.candidates.length) {
+      const content = json.candidates[0].content;
+      if (Array.isArray(content)) {
+        text = content.map(i => (typeof i === 'string' ? i : (i?.text ?? ''))).join('\n').trim();
+      } else if (typeof content === 'string') text = content;
+      else {
+        const found = [];
+        const walk = v => { if (!v) return; if (typeof v === 'string') found.push(v); else if (Array.isArray(v)) v.forEach(walk); else if (typeof v === 'object') Object.values(v).forEach(walk); };
+        walk(content);
+        text = found.join('\n').trim();
+      }
+    }
+    if (!text && Array.isArray(json?.output)) {
+      text = json.output.map(o => (typeof o === 'string' ? o : (o?.content?.map(c => c?.text || '').join('') || ''))).join('\n').trim();
+    }
+    if (!text) {
+      const collected = [];
+      const collect = v => { if (!v) return; if (typeof v === 'string') collected.push(v); else if (Array.isArray(v)) v.forEach(collect); else if (typeof v === 'object') Object.values(v).forEach(collect); };
+      collect(json);
+      text = collected.join('\n').slice(0, 3000).trim() || JSON.stringify(json);
+    }
+
+    // Eliminar líneas vacías o que solo contengan "model"
+    text = text.replace(/(^|\n)\s*model\s*(\n|$)/ig, '\n').replace(/\n{2,}/g, '\n\n').trim();
+
+    console.debug('[Gemini raw response]', json);
+    return { text, raw: json };
+  }
+
+  function nowTime() {
+    const d = new Date();
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function createMessageNode({ text, who='assistant', simulated=false }) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'msg-wrapper ' + (who === 'user' ? 'user' : 'assistant');
+
+    // avatar
+    const avatar = document.createElement('div');
+    avatar.className = 'msg-avatar';
+    avatar.textContent = who === 'user' ? 'TU' : 'AI';
+
+    // bubble
+    const bubble = document.createElement('div');
+    bubble.className = 'msg-bubble' + (simulated ? ' simulated' : '');
+    bubble.innerHTML = `<div class="msg-content">${escapeHtml(text)}</div>
+                        <div class="msg-meta"><div class="msg-time">${nowTime()}</div></div>`;
+
+    if (who === 'user') {
+      wrapper.appendChild(bubble);
+      wrapper.appendChild(avatar);
+    } else {
+      wrapper.appendChild(avatar);
+      wrapper.appendChild(bubble);
+    }
+    return wrapper;
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
+  }
+
+  function appendMessage(text, who='assistant', simulated=false) {
+    const node = createMessageNode({ text, who, simulated });
+    messagesEl.appendChild(node);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return node;
+  }
+
+  function appendTyping() {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'msg-wrapper assistant';
+    const avatar = document.createElement('div');
+    avatar.className = 'msg-avatar'; avatar.textContent = 'AI';
+    const typing = document.createElement('div');
+    typing.className = 'typing';
+    typing.innerHTML = `<div class="typing-dots"><span></span><span></span><span></span></div>`;
+    wrapper.appendChild(avatar);
+    wrapper.appendChild(typing);
+    messagesEl.appendChild(wrapper);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return wrapper;
+  }
+
+  // events
+  toggle.addEventListener('click', () => root.classList.contains('open') ? closeChat() : openChat());
+  closeBtn.addEventListener('click', closeChat);
+
+  function openChat(){ root.classList.remove('closed'); root.classList.add('open'); root.setAttribute('aria-hidden','false'); input.focus(); }
+  function closeChat(){ root.classList.remove('open'); root.classList.add('closed'); root.setAttribute('aria-hidden','true'); }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = input.value.trim(); if (!text) return;
+    appendMessage(text, 'user');
+    input.value='';
+    const typingNode = appendTyping();
+
+    try {
+      const json = await sendToGemini(text);
+      typingNode.remove();
+      const simulated = !!json?.simulated;
+      appendMessage(json?.text || 'Sin respuesta', 'assistant', simulated);
+    } catch (err) {
+      typingNode.remove();
+      appendMessage('Error: ' + (err.message || 'Error de conexión'), 'assistant', false);
+      console.error(err);
+    }
+  });
+
+  // shortcuts
+  window.addEventListener('keydown', (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ev.preventDefault(); openChat(); }
+    if (ev.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') { openChat(); input.focus(); }
+  });
+
+})();
